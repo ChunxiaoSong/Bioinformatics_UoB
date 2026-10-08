@@ -1,0 +1,188 @@
+---
+title: "Example 1"
+author: "Hugo Harrison"
+date: "MSc Bioinformatics - Sept 2026"
+---
+
+
+```{r setup, include=FALSE, warnings=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message=FALSE, warning=FALSE, cache.lazy = FALSE)
+```
+
+# Preparations
+
+Load the necessary libraries
+
+```{r libraries}
+library(readxl)       #for loading excel spreadsheets
+library(glmmTMB)      #for glmmTMB
+library(DHARMa)       #for residual diagnostics
+library(MuMIn)        #for model diagnostics
+library(effects)      #for partial effects plots
+library(ggeffects)    #for partial effects plots
+library(emmeans)      #for estimating marginal means
+library(modelr)       #for auxillary modelling functions
+library(patchwork)    #for multiple plots
+library(tidyverse)    #for data wrangling
+```
+
+# Scenario
+
+Here is an example from Fowler-1998. An agriculturalist was interested in the effects of fertiliser load on the yield of grass. Grass seed was sown uniformly over an area and different quantities of commercial fertiliser were applied to each of ten 1 m<sup>2</sup> randomly located plots. Two months later the grass from each plot was harvested, dried and weighed. The data are in the file **fertilizer.xlsx** in the **data** folder.
+
+| FERTILIZER   | YIELD   |
+| ------------ | ------- |
+| 25           | 84      |
+| 50           | 80      |
+| 75           | 90      |
+| 100          | 154     |
+| 125          | 148     |
+| \...         | \...    |
+
+---------------- ---------------------------------------------------
+**FERTILIZER**:  Mass of fertiliser (g.m^-2^) - Predictor variable
+**YIELD**:       Yield of grass (g.m^-2^) - Response variable
+---------------- ---------------------------------------------------
+
+ 
+The aim of the analysis is to investigate the relationship between fertiliser concentration and grass yield.
+
+# Read in the data
+
+```{r readData}
+fert = read_excel("../Intro to Bioinformatics/fertilizer.xlsx")
+```
+
+
+```{r examineData}
+glimpse(fert)
+## Explore the first 6 rows of the data
+head(fert)
+str(fert)
+```
+
+
+
+# Exploratory data analysis
+
+Model formula:
+$$
+y_i \sim{} \mathcal{N}(\mu_i, \sigma^2)\\
+\mu_i = \beta_0 + \beta_1 x_i
+$$
+
+where $y_i$ represents the $i$ observed values, $\beta_0$ and $\beta_1$ represent the intercept and slope respectively, and $\sigma^2$ represents the estimated variance.
+
+```{r}
+ggplot(data = fert, aes(y = YIELD, x = FERTILIZER)) +
+  geom_point()
+```
+
+
+
+# Fit the model
+
+```{r}
+fert.lm <- glmmTMB(formula = YIELD ~ FERTILIZER,
+                   data = fert,
+                   family = gaussian(link = "identity"))
+
+fert.lm2 <- lm(formula = YIELD ~ FERTILIZER,
+               data = fert)
+```
+
+
+# Model validation
+
+```{r}
+fert.lm |> simulateResiduals() |> plot()
+##|> means use the former output as the latter input.
+##It's function is the same as the follwing lines.
+resid <- simulateResiduals(fert.lm2)
+plot(resid)
+```
+
+
+# Partial plot
+
+```{r}
+fert.lm |> ggpredict() |> plot(show_data = TRUE)
+fert.lm2 |> ggpredict() |> plot(show_data = TRUE)
+```
+shadow is 95% confidence.
+
+# Model investigation / hypothesis testing 
+
+## Summary
+```{r}
+fert.lm |> summary()
+fert.lm2 |> summary()
+```
+```{r}
+51.9333/11.60880 ##How z value is calculated.
+```
+
+## Model coefficient of determination
+```{r}
+fert.lm |> r.squaredGLMM()
+```
+
+## Confidence intervals
+
+```{r}
+fert.lm |> confint(level = 0.95)
+```
+
+
+# Predictions 
+
+```{r}
+fert.lm |> emmeans(~FERTILIZER, at = list(FERTILIZER = c(60,200)))
+```
+
+
+# Additional analyses
+
+```{r}
+fert.lm |> emmeans(~FERTILIZER, 
+                   at = list(FERTILIZER = c(60,200))) |>
+  pairs(rev = TRUE)
+
+```
+
+
+# Summary figures
+
+```{r}
+fert_grid <- fert |> data_grid(FERTILIZER = 
+                                 seq_range(FERTILIZER, n=100))
+newdata <- fert.lm |> emmeans(~FERTILIZER, at = fert_grid) |>
+  as.data.frame()
+
+ggplot(data = newdata, aes(y = emmean, x = FERTILIZER)) +
+  geom_ribbon(aes(ymin = lower.CL, ymax = upper.CL), fill = "blue") +
+  geom_line() +
+  geom_point(data = fert, aes(y = YIELD, x = FERTILIZER), col = "orange") + labs(y = "Yield", x = "Fertiliser") +
+  labs(y = expression(Grass ~ yield ~ (g.m^-3)), x = expression(Fertilizer ~ concentration ~ (g.ml^-1))) +
+  theme_classic()
+```
+
+
+# References
+ 
+Foster, B.L. and Gross, K.L. (1998), SPECIES RICHNESS IN A SUCCESSIONAL GRASSLAND: EFFECTS OF NITROGEN ENRICHMENT AND PLANT LITTER. Ecology, 79: 2593-2602. https://doi.org/10.1890/0012-9658(1998)079[2593:SRIASG]2.0.CO;2
+
+```{r references}
+pkgs <- c("readxl", "glmmTMB", "DHARMa", "MuMIn", "effects", 
+          "ggeffects", "emmeans", "modelr", "patchwork", "tidyverse")
+
+# Print citations
+for (p in pkgs) {
+  cat("\n----------\n")
+  print(citation(package = p), bibtex = F)
+}
+
+#get R version
+#sessionInfo()
+```
+
