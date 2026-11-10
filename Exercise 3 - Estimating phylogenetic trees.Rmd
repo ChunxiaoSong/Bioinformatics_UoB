@@ -1,0 +1,211 @@
+---
+title: "Exercise 3 - Estimating phylogenetic trees"
+author: "Chunxiao Song"
+date: "2026-10-23"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+In the previous exercises, we used PCoA and k-means clustering to explore patterns of sequence similarity and compare genetic variation among groups. Pairwise distances can also help us identify representative sequences in large datasets, reducing redundancy and computational costs by excluding near-identical sequences that contribute relatively little additional information.
+
+However, sequence similarity alone does not tell us how sequences are related through evolution. Phylogenetic methods use sequence data and models of evolution to estimate evolutionary trees.
+
+In this exercise, we will estimate phylogenetic trees in R, assess support for the inferred relationships, and learn how to root and visualise the resulting trees.
+
+## 3.1 Estimating a tree from sequence distances
+
+Phylogenetic trees can be estimated using different approaches. Distance-based methods summarise the differences between sequences as pairwise distances and use these distances to estimate a tree. One widely used method is neighbour joining (NJ), a fast algorithm that builds a tree step by step. At each step, it joins the pair of sequences (or clusters) that best satisfies a criterion based on their distances from one another and from all other sequences. It then updates the distances between the resulting clusters and repeats the process until the tree is complete.
+
+We can estimate a neighbour-joining tree in R using the ape package. We will use the JC69-corrected distances calculated in the previous exercise:
+
+```{r}
+# Estimate a neighbour-joining tree
+nj_tree <- nj(jc_dist)
+
+# Plot the tree
+plot(nj_tree, cex = 0.6, no.margin = TRUE, type="unrooted", lab4ut="axial")
+```
+
+## Rooting a phylogenetic tree
+
+The neighbour-joining tree is initially unrooted. An unrooted tree represents relationships among sequences but does not indicate the direction of evolution or identify the common ancestor of all the sampled sequences.
+
+If we want to unserstand the order in which lineages diverged, we need to root the tree. One way to do this is to use an outgroup: a sequence or group of sequences known to fall outside the group of primary interest. In our dataset, MERS-CoV_Camel_Egypt_2016 acts as the outgroup to the hCoV19 coronavirus sequences. We can use this sequence to place the root on the branch separating the outgroup from the remaining sequences.
+
+```{r}
+# outgroup
+OG <- which(nj_tree$tip.label == "MERS-CoV_Camel_Egypt_2016")
+# Root the tree using the outgroup
+rooted_NJtree <- root_node(nj_tree, OG)
+
+# Plot the rooted tree
+plot(rooted_NJtree, cex = 0.6, no.margin = TRUE)
+```
+By default, trees are plotted with edge.lengths, which represent the estimated nucleotide substitutions per site. This type of tree is called a phylogram. However, when sequences are very closely related, branch lengths can be extremely short, making the branching pattern difficult to see. We can make the relationships easier to visualise by ignoring branch lengths and displaying only the branching pattern. This type of tree is called a cladogram.
+
+```{r}
+plot(rooted_NJtree, cex = 0.6, no.margin = TRUE, use.edge.length = F)
+
+#Each tip is given a unique index from 1-, where Ntip(tree). We can show the tip indexes as follows:
+tiplabels(cex = 0.5, adj = c(0, 2))
+
+#Similarly, each internal node is given a unique index from (Ntip(tree)+1) - (Ntip(tree)+Nnode(tree)). We can show the internal node indexes as follows: 
+nodelabels(cex = 0.5)
+```
+# Which sequence or group of sequences is the closest relative of the human coronavirus sequences?
+
+Bat Yunnan 2019
+
+# Which sequence or group of sequences is the closest relative of the hCoV-19_Bat_Rhinolophus_sinicus_China_2017 sequence?
+
+All descendants of node 50 are equally closely related to  hCoV-19_Bat_Rhinolophus_sinicus_China_2017. The clade defined by node 50 and hCoV-19_Bat_Rhinolophus_sinicus_China_2017 are sister groups, sharing a most recent common ancestor (node 58) to the exclusion of all other sampled sequences.
+
+## 3.3 Estimating a tree using Maximum Likelihood
+
+Neighbor joining (NJ) estimates a phylogenetic tree from pairwise distances between sequences. These distances summarise the differences between each pair of sequences, but they do not explicitly represent the patterns of nucleotide changes across the alignment. As a result, the tree that best fits the pairwise distances is not necessarily the tree that best explains the observed sequence data.
+
+An alternative approach is maximum likelihood (ML). Rather than estimating a tree from pairwise distances, ML calculates the probability of the observed alignment given a proposed tree and a model of sequence evolution. It searches for the tree and branch lengths that maximise this likelihood.
+
+ML offers several advantages over NJ. As we have seen, distances between distantly related sequences are noisy, because multiple substitutions at the same site (saturation) make the correction highly uncertain. NJ treats every distance as equally reliable. ML down-weights this unreliable information implicitly: at saturated sites the observed nucleotides are almost equally probable under any tree, so those sites contribute little to distinguishing between trees. ML also assigns a likelihood score to every candidate tree, which allows support for relationships to be evaluated explicitly and alternative models to be compared statistically.
+
+We will use the same JC69 model as before, now applied directly to the alignment rather than to correct pairwise distances. This lets us compare NJ and ML under the same model. ML is more computationally demanding than NJ, and its advantages depend on the model being a reasonable description of the data.
+
+We can estimate a ML tree using the phangorn R package (which we loaded earlier).
+
+First, we need to convert our alignment from DNAbin format, used by ape, to phyDat format, used by phangorn.
+
+```{r}
+# Convert the alignment to phyDat format
+pdat <- phyDat(hCoV19_alignment)
+```
+
+Next, we calculate the likelihood of our neighbour-joining tree under the JC69 model of sequence evolution. This gives us a starting point for the maximum-likelihood analysis.
+
+```{r}
+# Calculate the likelihood of the neighbour-joining tree
+fit <- pml(nj_tree, data = pdat, model = "JC")
+```
+
+The pml() function evaluates how well the proposed tree explains the observed sequence data under the chosen model. However, it does not search for a better tree. To find a tree with a higher likelihood, we need to optimise the tree’s branch lengths and topology.
+
+We can do this using optim.pml(). Here, we use nearest-neighbour interchange (NNI), which explores alternative tree arrangements by making small changes to the relationships between neighbouring branches.
+
+```{r}
+# Optimise the tree using maximum likelihood
+fitJC <- optim.pml(
+  fit,
+  rearrangement = "NNI"
+)
+```
+
+The resulting object, fitJC, contains the optimised tree and its maximum-likelihood estimates. We can extract the tree, root it using our outgroup (OG), and plot the result.
+
+```{r}
+# Root the maximum-likelihood tree using the outgroup
+rooted_JCtree <- root_node(fitJC$tree, OG)
+
+# Plot the rooted tree
+plot(rooted_JCtree, cex = 0.6, no.margin = TRUE)
+```
+
+We can visualise the difference between the NJ_tree and the ML_tree using the phytools::cophylo() function:
+
+```{r}
+t1 <- rooted_NJtree
+t2 <- rooted_JCtree
+t1$edge.length <- NULL
+t2$edge.length <- NULL
+obj<- cophylo(t1, t2)
+```
+```{r}
+plot(obj,link.type="curved",link.lwd=3,link.lty="solid",
+     link.col=make.transparent("blue",0.25),fsize=0.3, use.edge.lengths = F)
+```
+
+## 3.4 Assessing support for the tree using bootstrapping
+
+A phylogenetic tree is an estimate of evolutionary relationships, and some branches may be better supported by the data than others. Bootstrap resampling provides a way to assess how consistently the data support the inferred relationships.
+
+In bootstrap resampling, we repeatedly create new datasets by randomly sampling alignment columns with replacement. Each resampled dataset contains the same number of columns as the original alignment, but some sites may appear more than once while others are omitted. We then estimate a phylogenetic tree from each resampled dataset.
+
+We can count how often each edge appears across the resulting trees. This frequency is expressed as a bootstrap support value, usually as a percentage. For example, a support value of 95% means that the corresponding edge was recovered in 95% of the bootstrap trees.
+
+Ideally, we would perform at least 1,000 bootstrap replicates to obtain more stable estimates of support. However, maximum-likelihood bootstrapping can be computationally expensive because a tree must be estimated for every resampled dataset. For this demonstration, we will use 100 replicates to keep computation time manageable.
+
+```{r}
+#Get bootstrap replicates
+bs <- bootstrap.pml(fitJC, bs=100, multicore = T, optNni=TRUE, control = pml.control(trace = 0))
+
+#get bootstrap support
+rooted_JCtree <- clade_support(trees = bs, con = rooted_JCtree, digits = 2)
+
+#Plot tree and support values
+plot(rooted_JCtree, cex = 0.6, no.margin = TRUE, use.edge.length = F)
+nodelabels(text = rooted_JCtree$node.label, col = "darkred", cex = 0.6, frame = "none")
+```
+
+## 3.4 Beyond the JC69 model
+
+The JC69 model is a simple model of DNA evolution that makes several simplifying assumptions, for example:
+
+Equal nucleotide frequencies: A, C, G and T are assumed to occur at equal frequencies.
+
+Equal substitution rates: All changes between nucleotides are assumed to occur at the same rate. For example, a change from A to G is assumed to be just as likely as a change from A to T.
+
+Real DNA sequences may violate these assumptions. For example, some genes have a higher proportion of G and C nucleotides than A and T, and transitions (A ↔︎ G and C ↔︎ T) often occur at a higher rate than transversions (changes between a purine and a pyrimidine).
+
+The HKY model is a more complex model of sequence evolution. It relaxes some of the assumptions of the JC69 model, allowing unequal nucleotide frequencies and different rates for transitions and transversions.
+
+```{r}
+# Calculate the likelihood of the neighbour-joining tree
+fit <- pml(nj_tree, data = pdat, model = "HKY")
+
+# Optimise the tree using maximum likelihood
+fitHKY <- optim.pml(
+  fit,
+  rearrangement = "NNI",
+  model="HKY"
+)
+```
+```{r}
+# Root the maximum-likelihood tree using the outgroup
+rooted_HKYtree <- root_node(fitHKY$tree, OG)
+
+# Plot the rooted tree
+plot(rooted_HKYtree, cex = 0.6, no.margin = TRUE)
+```
+## 3.4 Model selection using AIC
+
+More complex models can often fit data better because they have more parameters to estimate. However, adding parameters does not necessarily improve a model enough to justify the extra complexity.
+
+The Akaike Information Criterion (AIC) provides a way to compare models by balancing goodness of fit against model complexity. It is calculated using the model’s log-likelihood and the number of parameters it estimates.
+
+The rationale for AIC rests on the principle of parsimony: a good model should explain the data well without being unnecessarily complex. Adding parameters will almost always improve a model’s fit to the data at hand, but beyond a certain point those additional parameters begin to capture random noise rather than genuine underlying patterns (overfitting), which reduces the model’s ability to generalise to new data. AIC addresses this by penalising each additional parameter, so that a more complex model is only favoured if the improvement in fit is large enough to justify the extra complexity. In this way, AIC aims to identify the model that best approximates the underlying process while remaining as simple as possible.
+
+AIC is interpreted comparatively: lower AIC values indicate a preferred model among those being compared. The difference in AIC between two models indicates the relative strength of support for one over the other, with larger differences generally providing stronger evidence in favour of the model with the lower AIC.
+
+```{r}
+#Compute difference in AIC between models
+AIC(fitJC) - AIC(fitHKY)
+```
+# Which model is preferred based on AIC?
+
+The HKY model is much better supported than JC69: its AIC is approximately 374 units lower, a difference far exceeding the conventional threshold of 10 for substantial support. AIC therefore strongly favours HKY over JC69, indicating that its additional parameters improve the fit well beyond what would be expected from added complexity alone.
+
+# Estimate the support for the edges in the HKY tree and plot the result.
+
+```{r}
+#Get bootstrap replicates
+bs <- bootstrap.pml(fitHKY, bs=100, multicore = T, optNni=TRUE, control = pml.control(trace = 0))
+
+#get bootstrap support
+rooted_HKYtree <- clade_support(trees = bs, con = rooted_HKYtree, digits = 2)
+
+#Plot tree and support values
+plot(rooted_HKYtree, cex = 0.6, no.margin = TRUE, use.edge.length = F)
+nodelabels(text = rooted_HKYtree$node.label, col = "darkred", cex = 0.6, frame = "none")
+```
+

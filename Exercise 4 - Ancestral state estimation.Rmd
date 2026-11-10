@@ -1,0 +1,104 @@
+---
+title: "Exercise 4 - Ancestral state estimation"
+author: "Chunxiao Song"
+date: "2026-10-23"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Phylogenetic Comparative Methods (PCMs) are a suite of statistical approaches used to analyse and interpret biological traits across species while accounting for their shared evolutionary history. By incorporating phylogenies (evolutionary trees), these methods help researchers control for non-independence among species and investigate patterns of trait evolution, adaptation, and diversification
+
+## 4.1 Ancestral State Estimation
+
+Ancestral state estimation, like most phylogenetic comparitive methods, requires two main components: (i) a phylogenetic tree with edge lengths representing time or the amount of evolutionary change; and (ii) some trait data you wish to study. In this exercise, we will use ancestral state estimation to investigate the host associations of ancestral coronaviruses. This will allow us to determine which animal groups were likely hosts of the ancestral viral lineages that gave rise to human-infecting viruses.
+
+First lets plot the host associations of the sequences on our HKY rooted tree.
+
+```{r}
+host_data <- factor(hCoV19_hosts)
+states <- levels(host_data)
+cols <- c("#008AD0", "#DC267F", "#FFB000", "#4BC6B9")
+names(cols) <- states
+par(mar = c(1.5,1.5,1.5,1.5))
+plot(rooted_HKYtree, show.tip.label = T, cex = 0.5)
+par(fg = "transparent")
+tiplabels(pie=to.matrix(hCoV19_hosts, seq = states),piecol=cols,cex=0.3)
+par(fg = "black")
+legend("bottomleft", legend = states,  pch = 16, col = cols, pt.cex = 1.2, cex = 0.8)
+title("HKY maximum likelihood tree of coronaviruses")
+```
+Our goal is to estimate the ancestral hosts of coronaviruses. To do this, we need a model of trait evolution that describes how traits—in this case, host associations—change over time. This is analogous to models of DNA sequence evolution, such as JC69 and HKY, which describe how substitutions between DNA bases occur.
+
+The simplest commonly used model of discrete trait evolution is the Equal rates (ER) model, also known as the Mk model. This is a generalisation of the JC69 model to any number of discrete states, rather than just the four DNA bases. Like JC69, the ER model assumes that all changes between different states occur at the same rate.
+
+We can fit an ER model to our data using the phytools::fitMk() function. When performing likelihood-based ancestral state estimation, I prefer to rescale the tree so that its height equals 1. This ensures that the estimated transition rates are not excessively small.
+
+```{r}
+tree_scaled <- rooted_HKYtree
+tree_scaled$edge.length <- tree_scaled$edge.length/ max(node.depth.edgelength(tree_scaled))
+fitER <- fitMk(tree = tree_scaled, x = hCoV19_hosts, model = "ER", pi="fitzjohn")
+par(mar = c(1.5,1.5,1.5,1.5))
+plot(fitER,color=TRUE, width = T, text = F)
+```
+We can use this model to estimate the ancestral states at internal nodes of the phylogenetic tree. We will use marginal ancestral state reconstruction, which estimates the probability of each possible state at each node, given the observed data (i.e. our host associations), the phylogenetic tree and the model. For example, a node might have an estimated probability of 70% of being associated with bats and 30% of being associated with another host group. These probabilities allow us to assess the uncertainty in our estimates, rather than assigning a single host to each ancestor.
+
+```{r}
+ancER <- ancr(fitER)
+
+#Matrix of ancestral state probabilities. Columns correspond to the states. Rows correspond to each internal node in the tree.
+head(ancER$ace)
+```
+```{r}
+#plot the probabilities as pie charts on the tree
+plot(ancER, args.plotTree = list(mar=c(0.1,1.1,2.1,1.1)), args.tiplabels=list(cex = 0.3), args.nodelabels=list(piecol=cols, cex = 0.4), legend = "bottomleft")
+title("ER model (4 state)")
+```
+More complex trait evolution models relax the assumptions of the ER model. The Symmetric (SYM) model relaxes the assumption that all transitions rates are equal, but assumes that forward and backward transition rates are equal (e.g. transitioning from a pangolin host to a bat host occurs at the same rate as transitioning from a bat host to a pangolin host). The All Rates Different (ARD) model goes even further, allowing all rates to vary.
+
+```{r}
+fitSYM <- fitMk(tree = tree_scaled, x = hCoV19_hosts, model = "SYM", pi="fitzjohn")
+fitARD <- fitMk(tree = tree_scaled, x = hCoV19_hosts, model = "ARD", pi="fitzjohn")
+#change the plot window to two columns
+par(mfrow = c(1, 2), mar = c(1.5,1.5,1.5,1.5))
+plot(fitSYM,color=TRUE, width = T, text = F)
+plot(fitARD,color=TRUE, width = T, text = F)
+```
+```{r}
+#reset the plot window
+par(mfrow = c(1, 1))
+```
+
+# Which model of trait evolution best explains the data? Based on this model, what is the probability that the most recent common ancestor of ancestor of all human and pangolin coronavirus sequences had a pangolin host?
+
+```{r}
+#calculate AICs
+AIC_scores <- AIC(fitER, fitSYM, fitARD)
+
+#determine which AIC is the lowest
+best_model <- get(rownames(AIC_scores)[which(AIC_scores == min(AIC_scores))])
+
+#calculate ancestral states
+best_anc <- ancr(best_model)
+
+#find node index of the most recent common ancestor (mrca) of pangolin and human hosts
+
+#Note you can do this by plotting the node numbers finding the one corresponding to the mrca of all palngolin and human sequences. 
+
+#Alternatively, you can get this information automatically by doing the following:
+
+# Get the names of all sequences associated with pangolins or humans
+pangolins_humans <- names(which(hCoV19_hosts == "Pangolin" | hCoV19_hosts == "Human"))
+
+#then find their mrca using the phangorn function mrca.phylo()
+anc_node <- mrca.phylo(x = rooted_HKYtree, node = pangolins_humans)
+
+#then get the probability of each hosts for the anc_node. 
+best_anc$ace[paste(anc_node),]
+```
+
+## Conclusion
+
+In this practical, you have used DNA sequence data to investigate evolutionary relationships. You calculated and corrected pairwise distances, visualised sequence variation with PCoA and k-means clustering, and estimated phylogenetic trees using neighbour joining and maximum likelihood. You then compared evolutionary models, assessed support using bootstrapping, and applied ancestral state estimation to coronavirus host associations. Together, these analyses demonstrate the power of computational approaches for studying evolutionary history, and the importance of choosing appropriate models and accounting for uncertainty.

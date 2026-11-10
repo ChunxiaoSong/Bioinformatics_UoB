@@ -1,0 +1,156 @@
+---
+title: "Exercise 2 - Cluster analysis using kmeans"
+author: "Chunxiao Song"
+date: "2026-10-23"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+In Exercise 1, we used Principal Coordinate Analysis (PCoA) to visualise patterns of similarity and dissimilarity between SARS-CoV-2 sequences. We observed that some sequences appeared close together, while others were more widely separated.
+
+We can investigate these patterns further using cluster analysis, which groups samples according to their similarity. In this exercise, we will use k-means clustering to identify groups of sequences, assess how well separated these groups are, and compare the resulting clusters with the known host information.
+
+## 2.1 Introduction to k-means clustering
+
+K-means is an unsupervised clustering algorithm that divides samples into a specified number of clusters, (k), based on their positions in a multidimensional space.
+
+The algorithm works by:
+
+Assigning samples to (k) clusters.
+
+Calculating the centre (mean position) of each cluster.
+
+Reassigning samples to the cluster whose centre is closest.
+
+Repeating these steps until the assignments stabilise.
+
+The algorithm aims to minimise the variation within clusters, so samples in the same cluster tend to lie close together.
+
+Here, we will apply k-means to the first two PCoA axes calculated in Exercise 1. This means that clustering is based on the two-dimensional representation of the JC69 distances, rather than the full distance matrix.
+
+## 2.2 Applying k-means clustering
+
+K-means requires us to specify the number of clusters, (k), in advance. Let’s start by dividing the sequences into three clusters.
+
+```{r}
+# Extract all 10 PCoA axes for clustering
+pcoa_coords <- pcoa_df[, paste0("PCoA", 1:10)]
+
+# Perform k-means clustering
+
+km <- kmeans(
+  pcoa_coords,
+  centers = 3,
+  nstart = 25
+)
+
+# Store the cluster assignments
+pcoa_df$Cluster <- factor(km$cluster)
+```
+
+## 2.3 Choosing the number of clusters
+
+One big disadvantage of kmeans clustering is that it requires us to specify the number of clusters a priori.In practice, we rarely know how many clusters are present in the data. So far, we have arbitrarily chosen three clusters without assessing whether this is appropriate. How could we determine whether two, three, four, or more clusters provide the best representation of the data?
+
+One approach is silhouette analysis. The silhouette width measures how well each sample fits within its assigned cluster compared with other clusters. Values range from −1 to 1:
+
+Values close to 1 indicate that a sample is much closer to its own cluster than to neighbouring clusters.
+
+Values close to 0 indicate that a sample lies near the boundary between clusters.
+
+Negative values suggest that a sample may be closer to another cluster than to its assigned cluster.
+
+We can calculate the average silhouette width for different values of (k) and compare the results.First, install and load the cluster package if necessary:
+
+```{r}
+if (!require(cluster)) {
+  install.packages("cluster")
+}
+library(cluster)
+```
+Next, calculate silhouette widths for solutions containing between two and six clusters.
+
+```{r}
+# Calculate Euclidean distances in the PCoA space
+pcoa_dist <- dist(pcoa_coords)
+
+# Test different numbers of clusters
+k_values <- 2:10
+mean_silhouette <- numeric(length(k_values))
+
+for (i in seq_along(k_values)) {
+
+  km_test <- kmeans(
+    pcoa_coords,
+    centers = k_values[i],
+    nstart = 25
+  )
+
+  sil <- silhouette(km_test$cluster, pcoa_dist)
+
+  mean_silhouette[i] <- mean(sil[, "sil_width"])
+}
+
+# Plot the results
+plot(
+  k_values,
+  mean_silhouette,
+  type = "b",
+  pch = 19,
+  xlab = "Number of clusters (k)",
+  ylab = "Mean silhouette width",
+  main = "Choosing the Number of Clusters"
+)
+```
+
+```{r}
+# Select the number of clusters with the highest mean silhouette width
+optimal_k <- k_values[which.max(mean_silhouette)]
+
+# Rerun k-means using the optimal number of clusters
+set.seed(123)
+
+km_optimal <- kmeans(
+  pcoa_coords,
+  centers = optimal_k,
+  nstart = 25
+)
+
+# Store cluster assignments
+pcoa_df$Clusters <- factor(km_optimal$cluster)
+```
+
+A higher mean silhouette width generally indicates better-separated clusters. However, it should be treated as a guide rather than definitive proof that a particular number of clusters is biologically correct.
+
+Finally, we can plot the clusters on the first two PCoA axes:
+
+```{r}
+#Points colured by kmeans cluster
+ggplot(pcoa_df, aes(x = PCoA1, y = PCoA2, colour = Clusters)) +
+  geom_point(size = 3, alpha = 0.9) +
+  labs(
+    x = paste0("PCoA1 (", round(variance[1], 1), "%)"),
+    y = paste0("PCoA2 (", round(variance[2], 1), "%)"),
+    title = "K-means Clustering of SARS-CoV-2 Sequences",
+    colour = "Cluster"
+  ) +
+  theme_classic()
+```
+# Replot the PCoA, colouring the points according to the host information data(hCoV19_hosts). How does the distribution of hosts compare with the clusters identified by k-means? What does this tell us about the data?
+
+```{r}
+ggplot(pcoa_df, aes(x = PCoA1, y = PCoA2, colour = hCoV19_hosts)) +
+  geom_point(size = 3, alpha = 0.9) +
+  labs(
+    x = paste0("PCoA1 (", round(variance[1], 1), "%)"),
+    y = paste0("PCoA2 (", round(variance[2], 1), "%)"),
+    title = "K-means Clustering of SARS-CoV-2 Sequences",
+    colour = "hCoV19_hosts"
+  ) +
+  theme_classic()
+```
+Human SARS-CoV-2 sequences fall within a cluster that also contains bat and pangolin coronavirus sequences, suggesting that these sequences are genetically similar. Other bat coronavirus sequences fall within a separate cluster, potentially reflecting the presence of multiple genetically distinct variants within bats. This illustrates that sequence similarity does not necessarily correspond directly to host identity. Viruses from different hosts can be genetically similar, while viruses sampled from the same host species can be genetically distinct. However, clustering alone cannot establish the direction of transmission or prove that a particular host was the source of human infection.
+

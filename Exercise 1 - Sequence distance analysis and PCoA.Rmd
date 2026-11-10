@@ -1,0 +1,485 @@
+---
+title: "Exercise 1 - Sequence distance analysis and PCoA"
+author: "Chunxiao Song"
+date: "2026-10-23"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 1.1 Installing the required packages
+
+For this practical, we will use treesurgeon, an R package developed by Joe Keating to support phylogenetic analyses and evolutionary research.
+
+treesurgeon depends on several established R packages for evolutionary biology. These packages provide tools for working with DNA sequences, calculating evolutionary distances, estimating phylogenetic trees, and analysing evolutionary patterns:
+
+ape: tools for analysing DNA sequences, calculating evolutionary distances, manipulating and rooting phylogenetic trees, and plotting phylogenies.
+phangorn: methods for phylogenetic inference, including maximum-likelihood estimation, nucleotide substitution models, and bootstrap assessment of phylogenetic support.
+phytools: tools for phylogenetic comparative biology, including ancestral-state estimation, evolutionary visualisation, and analyses of trait evolution.
+For further information about treesurgeon, including its source code, documentation and dependencies, see the GitHub repository.
+
+We will install the package directly from GitHub using the remotes package.
+
+First, install remotes if it is not already available:
+
+```{r}
+if (!require(remotes)) {
+  install.packages("remotes")
+}
+```
+
+Next, install and load the treesurgeon package:
+
+```{r}
+remotes::install_github("evo-palaeo/treesurgeon")
+library(treesurgeon)
+```
+
+Installing treesurgeon will automatically install its dependendencies, and loading the package will also load its dependencies.
+
+The datasets for this practical are provided separately in the TeachingMaterials package:
+
+```{r}
+remotes::install_github("evo-palaeo/TeachingMaterials")
+library(TeachingMaterials)
+```
+
+## Loading and inspecting the data
+
+The sequence alignment and associated host information are provided in the TeachingMaterials package. As a quick reminder, an alignment is a set of DNA sequences in which homologous nucleotide positions have been placed in the same columns. Each row represents a sequence, and each column represents a nucleotide position.
+
+Our aim is to investigate the patterns of variation in the alignment and then use those data to infer evolutionary relationships.
+
+First, load and inspect the alignment:
+
+```{r}
+data(hCoV19_alignment)
+hCoV19_alignment
+```
+We can visualise the alignment using the base R ‘image()’ function:
+
+```{r}
+image(
+  hCoV19_alignment, 
+  show.labels = TRUE,
+  show.nucs = FALSE,
+  cex = 0.4,
+  col = c(hcl.colors(n = 4, palette = "zissou"), "grey", "white")
+)
+```
+
+## 1.3 Calculating pairwise sequence distances
+
+One way to quantify differences between DNA sequences is to calculate the proportion of nucleotide positions at which two sequences differ. This is known as the raw sequence distance, or p-distance. For example, if two sequences differ at 50 out of 1,000 aligned positions, their raw distance is:
+p=501000=0.05
+
+This means that 5% of their aligned positions differ. However, it does not necessarily mean that only 5% of sites have experienced an evolutionary substitution. A site may have changed more than once during the evolutionary history of the sequences. We can calculate the pairwise raw distances using dist.dna() from the ape package.
+
+```{r}
+raw.distances <- dist.dna(
+  hCoV19_alignment,
+  model = "raw"
+)
+```
+
+The result is a distance matrix stored as a dist object. Each entry gives the distance between a pair of sequences.
+
+This function outpusts a distance matrix (class = “dist”). It is easier to inspect if we convert it to a regular matrix, for example:
+
+```{r}
+as.matrix(raw.distances) [1:3, 1:3]
+```
+Notice that the distance matrix is symmetrical: the distance between two sequences is the same regardless of their order. In other words, the distance between seqA and seqB is the same as the distance between seqB and seqA.
+
+# What is the distance between the first two sequences?
+
+```{r}
+as.matrix(raw.distances) [1, 2]
+```
+
+# Which pair has the largest distance?
+
+```{r}
+which(as.matrix(raw.distances) == max(as.matrix(raw.distances)), arr.ind = T)
+```
+
+# What would a distance of zero mean?
+
+The two sequences are identical.
+
+## 1.4 Estimating evolutionary divergence
+
+Raw sequence distance measures the proportion of sites that differ between two sequences. However, it does not count the total number of substitutions that have occurred during their evolutionary history.
+
+Consider a single nucleotide position. It might change from A to G, then later change from G to T. We observe that the final state differs from the original state, but we cannot tell from the two sequences alone that two substitutions occurred.
+
+Alternatively, a site might change from A to G and subsequently revert from G to A. The two sequences would appear identical at that site, even though two substitutions had occurred.
+
+These events are examples of multiple hits. They mean that raw sequence distance can underestimate the amount of evolutionary change.
+
+We can demonstrate this by simulating substitutions in DNA sequences:
+
+```{r}
+original_sample <- sample(
+  c("A", "T", "C", "G"),
+  100,
+  replace = TRUE
+)
+
+sequences <- rbind(original_sample, original_sample)
+rownames(sequences) <- c("Seq1", "Seq2")
+
+res <- numeric(100)
+
+for (i in 1:1000) {
+
+  if (runif(1) > 0.9) {
+    site <- sample(1:100, 1)
+    sequences[1, site] <-
+      sample(
+        setdiff(c("A", "C", "G", "T"), sequences[1, site]),
+        1
+      )
+  }
+
+  if (runif(1) > 0.9) {
+    site <- sample(1:100, 1)
+    sequences[2, site] <-
+      sample(
+        setdiff(c("A", "C", "G", "T"), sequences[2, site]),
+        1
+      )
+  }
+
+  if (i %% 10 == 0) {
+    res[i / 10] <-
+      dist.dna(as.DNAbin(sequences), model = "raw")[1]
+  }
+}
+
+plot(
+  seq(10, 1000, 10),
+  res,
+  type = "l",
+  xlab = "Iteration",
+  ylab = "Raw sequence distance",
+  ylim = c(0, 1),
+  main = "Observed sequence distance through time"
+)
+```
+
+Run the simulation script above and answer the following questions:
+
+# What does the simulation script do?
+
+The script starts with two identical DNA sequences, each 100 nucleotides long. Over 1,000 iterations, each sequence has a 10% probability of a nucleotide substitution at a randomly selected site per iteration. The raw sequence distance is recorded every 10 iterations.
+
+# Describe the relationship you observe between number of substitutions and raw distance.
+
+Raw sequence distance tends to increase initially as substitutions accumulate, but the relationship is nonlinear. As the number of iterations increases, the distance fluctuates around an equilibrium of approximately 0.75.
+
+# Does distance always increase? If not, why?
+
+No. A substitution can make two previously different nucleotides identical, for example through a reversal or a multiple substitution. Consequently, the observed distance can decrease even while substitutions continue to occur.
+
+# If you were to run this simulation for a huge number of iterations (e.g. 10,000), what would you expect to observe and why?
+
+The raw distance would fluctuate around an equilibrium rather than increasing indefinitely. Because the sequences evolve independently, and each nucleotide can change to any of the other three states with equal probability, the expected proportion of differing sites approaches 0.75 over long periods. At equilibrium, two independently evolving sites have a 25% probability of sharing the same nucleotide and a 75% probability of differing.
+
+## 1.5 Correcting distances using the Jukes–Cantor model
+
+The simulation illustrates why observed sequence differences are not a complete measure of evolutionary divergence. To account for substitutions that are not directly observed, we can use a nucleotide substitution model.
+
+The Jukes–Cantor model (JC69) is one of the simplest nucleotide substitution models. It assumes that:
+
+All four nucleotide states occur at equal equilibrium frequencies.
+Every type of nucleotide substitution occurs at the same rate.
+Substitutions at different sites evolve independently.
+Under this model, the expected proportion of differing sites, p
+, is related to the evolutionary distance, d
+, by:
+
+p=34(1−e−4d/3)
+
+Rearranging gives the JC69 correction:
+
+d=−34ln(1−4p3)
+
+Unlike raw distance, the corrected distance accounts for the possibility that a site has experienced multiple substitutions.
+
+We can implement the correction in R:
+
+```{r}
+# JC69 correction function
+jc69 <- function(p) {
+  -3 / 4 * log(1 - 4 * p / 3)
+}
+
+# Plot raw distance
+iterations <- seq(10, 1000, 10)
+res_jc69 <- ifelse(res < 0.75, jc69(res), NA)
+
+plot(
+    iterations,
+    res,
+    type = "l",
+    xlab = "Iteration",
+    ylab = "Sequence distance",
+    ylim = c(0, max(res_jc69)),
+    main = "Raw and JC69-corrected sequence distances"
+)
+
+# Add JC69-corrected distance
+
+lines(
+    iterations,
+    res_jc69,
+    col = "red",
+    lwd = 2
+)
+
+legend(
+    "topleft",
+    legend = c("Raw distance", "JC69-corrected distance"),
+    col = c("black", "red"),
+    lty = 1,
+    lwd = 2
+)
+```
+# 8.Why does the JC69 line become jagged towards the right of the plot?
+
+The JC69 correction becomes increasingly sensitive to small changes in raw distance as sequences approach saturation (around 75% differing sites). Consequently, small fluctuations in raw distance produce increasingly large fluctuations in corrected distance. This reflects a genuine limitation: as multiple substitutions accumulate at the same sites, the number of evolutionary changes becomes increasingly difficult to estimate reliably.
+
+## 1.6 Visulising pairwise distances
+
+We can represent the pairwise distances between three sequences in two-dimensional space because any three valid pairwise distances can be represented as the sides of a triangle:
+
+```{r}
+# Select three sequences
+set.seed(1)
+selected <- sample(seq_along(hCoV19_alignment), 3)
+three_sequences <- hCoV19_alignment[selected]
+
+# Calculate JC69 distances
+d3 <- as.matrix(
+  ape::dist.dna(three_sequences, model = "JC69")
+)
+
+# Extract the three pairwise distances
+a <- d3[1, 2]
+b <- d3[1, 3]
+c <- d3[2, 3]
+
+# Calculate coordinates from the distances
+x3 <- (a^2 + b^2 - c^2) / (2 * a)
+y3 <- sqrt(max(0, b^2 - x3^2))
+
+coords3 <- rbind(
+  c(0, 0),
+  c(a, 0),
+  c(x3, y3)
+)
+
+rownames(coords3) <- rownames(d3)
+
+# Plot the triangle
+plot(
+  coords3,
+  type = "n",
+  asp = 1,
+  xlab = "Distance (x)",
+  ylab = "Distance (y)",
+  main = "Three sequences in 2D",
+  xlim = c(-0.02, 0.12),
+  ylim = range(coords3[, 2]) + c(-0.02, 0.02)
+)
+
+polygon(coords3, border = "steelblue", lwd = 2)
+points(coords3, pch = 19, cex = 1.5)
+text(coords3, labels = rownames(coords3), pos = 3, cex = 0.5)
+```
+However, as we add more sequences, we may need additional dimensions to represent all pairwise distances exactly. For example, four sequences can always be represented exactly in three dimensions:
+
+```{r}
+# Select four sequences
+set.seed(1)
+selected <- sample(seq_along(hCoV19_alignment), 4)
+four_sequences <- hCoV19_alignment[selected]
+
+# Calculate JC69 distances
+d4 <- as.matrix(
+  ape::dist.dna(four_sequences, model = "JC69")
+)
+
+# Label the four points A, B, C and D
+labels <- rownames(d4)
+
+# Extract pairwise distances
+AB <- d4[1, 2]
+AC <- d4[1, 3]
+AD <- d4[1, 4]
+BC <- d4[2, 3]
+BD <- d4[2, 4]
+CD <- d4[3, 4]
+
+# Place A at the origin and B on the x-axis
+A <- c(0, 0, 0)
+B <- c(AB, 0, 0)
+
+# Calculate coordinates of C using distances to A and B
+xC <- (AC^2 + AB^2 - BC^2) / (2 * AB)
+yC <- sqrt(max(0, AC^2 - xC^2))
+C <- c(xC, yC, 0)
+
+# Calculate coordinates of D using distances to A, B and C
+xD <- (AD^2 + AB^2 - BD^2) / (2 * AB)
+
+yD <- (
+  AD^2 + AC^2 - CD^2 - 2 * xC * xD
+) / (2 * yC)
+
+zD <- sqrt(max(0, AD^2 - xD^2 - yD^2))
+D <- c(xD, yD, zD)
+
+# Combine coordinates
+coords4 <- rbind(A, B, C, D)
+rownames(coords4) <- labels
+
+# Plot the tetrahedron
+scatterplot3d::scatterplot3d(
+  coords4[, 1],
+  coords4[, 2],
+  coords4[, 3],
+  type = "n",
+  xlab = "Distance (x)",
+  ylab = "Distance (y)",
+  zlab = "Distance (z)",
+  main = "Four sequences in 3D"
+) -> p
+
+p$points3d(coords4[, 1], coords4[, 2], coords4[, 3],
+           pch = 19, cex = 1.5)
+
+# Draw all six edges
+edges <- combn(1:4, 2)
+for (i in 1:ncol(edges)) {
+  p$points3d(
+    coords4[edges[, i], 1],
+    coords4[edges[, i], 2],
+    coords4[edges[, i], 3],
+    type = "l",
+    lwd = 2,
+    col = "steelblue"
+  )
+}
+
+# Add labels
+p$points3d(
+  coords4[, 1], coords4[, 2], coords4[, 3],
+  type = "n"
+)
+text(
+  p$xyz.convert(coords4[, 1], coords4[, 2], coords4[, 3]),
+  labels = labels,
+  pos = 3,
+  cex = 0.7
+)
+```
+As we add more sequences, we may need more than three dimensions to represent all pairwise distances exactly. However, we cannot visualise more than three spatial dimensions, so we need a way to represent these distances in fewer dimensions while preserving them as accurately as possible.
+
+One solution is Principal Coordinate Analysis (PCoA), also known as classical multidimensional scaling.
+
+## 1.7 Principal Coordinate Analysis (PCoA)
+
+PCoA, is a dimensionality-reduction method that represents samples as points in a lower-dimensional space using a matrix of pairwise distances between them.
+
+Goal: To make patterns of similarity and dissimilarity between samples easier to visualise, while preserving the original pairwise distances as faithfully as possible.
+
+How it works: PCoA uses the distance matrix to calculate coordinates for each sample along a set of new axes, called principal coordinates. These axes are ordered to capture the distance structure of the data, with the first capturing the greatest amount, the second the next greatest, and so on. Each axis has an associated value that helps determine how much of the overall distance structure it represents. Plots often express this as a percentage (e.g. “PCoA1, 34%”). Plotting the first two or three axes allows us to visualise relationships between samples, although some distances may be distorted when the remaining dimensions are omitted.
+
+Interpretation: Each point represents a sample, and the distances between points approximate the original pairwise distances. Samples plotted close together are more similar under the chosen distance measure, while samples further apart are more dissimilar. The axes do not usually correspond to specific biological variables. PCoA calculates eigenvalues, which indicate how much of the distance structure is represented along each axis. The percentages in the axis labels show the proportion of the total positive eigenvalue sum represented by each axis. Because we are plotting only two dimensions, some of the original pairwise distances may not be preserved exactly.
+
+## 1.8 Performing a PCoA in R
+
+Lets install and load ggplot2, which we will use to visualie our multivariate analyses.
+
+```{r}
+if (!require(ggplot2)) {
+  install.packages("ggplot2")
+}
+
+library(ggplot2)
+```
+
+Step 1: Calculate JC69 distances
+We can use the Jukes–Cantor 69 model to calculate evolutionary distances between every pair of sequences.
+
+```{r}
+jc_dist <- ape::dist.dna(
+  hCoV19_alignment,
+  model = "JC69"
+)
+```
+
+Step 2: Perform PCoA
+We can use cmdscale(), R’s built-in classical multidimensional scaling function, to perform PCoA. Here, we retain the first two dimensions for visualisation.
+
+```{r}
+pcoa_result <- cmdscale(
+  jc_dist,
+  k = 10,
+  eig = TRUE
+)
+```
+
+Step 3: Visualise results
+
+```{r}
+# Extract PCoA coordinates
+pcoa_df <- as.data.frame(pcoa_result$points)
+
+# Name the first ten coordinate axes
+colnames(pcoa_df) <- paste0("PCoA", seq_len(ncol(pcoa_df)))
+
+# Calculate percentages from positive eigenvalues
+eig <- pcoa_result$eig
+variance <- 100 * eig / sum(eig[eig > 0])
+
+# Plot PCoA1 against PCoA2
+p1 <- ggplot(pcoa_df, aes(x = PCoA1, y = PCoA2)) +
+  geom_point(size = 3, alpha = 0.8) +
+  labs(
+    x = paste0("PCoA1 (", round(variance[1], 1), "%)"),
+    y = paste0("PCoA2 (", round(variance[2], 1), "%)"),
+    title = "PCoA: Axes 1 and 2"
+  ) +
+  theme_classic()
+
+# Plot PCoA3 against PCoA4
+p2 <- ggplot(pcoa_df, aes(x = PCoA3, y = PCoA4)) +
+  geom_point(size = 3, alpha = 0.8) +
+  labs(
+    x = paste0("PCoA3 (", round(variance[3], 1), "%)"),
+    y = paste0("PCoA4 (", round(variance[4], 1), "%)"),
+    title = "PCoA: Axes 3 and 4"
+  ) +
+  theme_classic()
+
+p1
+```
+```{r}
+p2
+```
+Higher percents means this PCoA axe is more important.
+
+# What percentage of the positive-eigenvalue variation is represented by the first four PCoA axes?
+
+Together, PCoA1 - PCoA4 represent 95.1% of the total positive-eigenvalue sum (67.3% + 18.5% + 7.3% + 2%).
+
+# What does the distance between points represent?
+
+The distance between points approximates the JC69 evolutionary distance between sequences. Points closer together represent smaller distances, while points further apart represent larger distances. Because the plot shows only two dimensions, these distances may not exactly match the original JC69 distances.
+
+
